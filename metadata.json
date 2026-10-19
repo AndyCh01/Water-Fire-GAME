@@ -1,0 +1,7 @@
+{
+  "name": "Water-Fire",
+  "description": "Juego cooperativo de plataformas y puzzles al estilo Fireboy y Watergirl con 3 niveles desafiantes y un Guardián elemental en el nivel final.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
