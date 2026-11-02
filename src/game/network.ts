@@ -8,8 +8,8 @@ class NetworkManager {
 
   public init(): Socket {
     if (!this.socket) {
-      // Connect to the same origin server on port 3000
-      this.socket = io({
+    
+      this.socket = io("https://water-fire-backend.onrender.com", {
         transports: ['websocket', 'polling'],
         reconnectionAttempts: 10,
         reconnectionDelay: 1000,
