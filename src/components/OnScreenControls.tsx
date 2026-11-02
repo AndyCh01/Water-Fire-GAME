@@ -1,9 +1,12 @@
 import React from 'react';
 import { ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react';
+import { PlayerRole } from '../types/game';
 
 interface OnScreenControlsProps {
   soloMode: boolean;
   activeSoloCharacter: 'fire' | 'water';
+  isOnline: boolean;
+  playerRole: PlayerRole | null;
   onInputDown: (action: string) => void;
   onInputUp: (action: string) => void;
   onSwitchSolo: () => void;
@@ -12,6 +15,8 @@ interface OnScreenControlsProps {
 export const OnScreenControls: React.FC<OnScreenControlsProps> = ({
   soloMode,
   activeSoloCharacter,
+  isOnline,
+  playerRole,
   onInputDown,
   onInputUp,
   onSwitchSolo,
@@ -44,14 +49,17 @@ export const OnScreenControls: React.FC<OnScreenControlsProps> = ({
     },
   });
 
+  const showWaterControls = isOnline ? playerRole === 'water' : !soloMode || activeSoloCharacter === 'water';
+  const showFireControls = isOnline ? playerRole === 'fire' : !soloMode || activeSoloCharacter === 'fire';
+
   return (
     <div className="w-full bg-slate-950/80 backdrop-blur-sm border-t border-slate-800/80 py-2 px-4 flex items-center justify-between select-none">
-      {/* Water Controls (Left side or active) */}
-      {(!soloMode || activeSoloCharacter === 'water') && (
+      {/* Water Controls */}
+      {showWaterControls && (
         <div className="flex items-center gap-2">
           <div className="flex flex-col items-center">
             <span className="text-[10px] font-semibold text-cyan-400 mb-1 uppercase tracking-wider">
-              Chica Agua (WASD)
+              {isOnline ? 'Tus Controles: Chica Agua (WASD)' : 'Chica Agua (WASD)'}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -87,22 +95,22 @@ export const OnScreenControls: React.FC<OnScreenControlsProps> = ({
         </div>
       )}
 
-      {/* Solo Mode Switch Button */}
-      {soloMode && (
+      {/* Solo Mode Switch Button (Offline Only) */}
+      {!isOnline && soloMode && (
         <button
           onClick={onSwitchSolo}
-          className="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md active:scale-95 transition-all"
+          className="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md active:scale-95 transition-all mx-auto"
         >
           Cambiar a {activeSoloCharacter === 'water' ? 'Fuego 🔥' : 'Agua 💧'} (Espacio)
         </button>
       )}
 
-      {/* Fire Controls (Right side or active) */}
-      {(!soloMode || activeSoloCharacter === 'fire') && (
+      {/* Fire Controls */}
+      {showFireControls && (
         <div className="flex items-center gap-2 ml-auto">
           <div className="flex flex-col items-center">
             <span className="text-[10px] font-semibold text-orange-400 mb-1 uppercase tracking-wider">
-              Chico Fuego (Flechas)
+              {isOnline ? 'Tus Controles: Chico Fuego (Flechas)' : 'Chico Fuego (Flechas)'}
             </span>
             <div className="flex items-center gap-2">
               <button

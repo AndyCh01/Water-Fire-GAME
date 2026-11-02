@@ -222,7 +222,11 @@ export class GamePhysicsEngine {
     waterPlayer: Player,
     inputs: GameInputs,
     onPlayerDeath: (reason: string) => void,
-    onLevelComplete: () => void
+    onLevelComplete: () => void,
+    localRole?: 'fire' | 'water',
+    onLocalGemCollected?: (gemId: string, element: 'fire' | 'water') => void,
+    onLocalLeverToggled?: (leverId: string, isOn: boolean) => void,
+    onLocalPlateChanged?: (plateId: string, isPressed: boolean) => void
   ) {
     if (this.screenShake > 0) {
       this.screenShake *= 0.9;
@@ -332,20 +336,24 @@ export class GamePhysicsEngine {
       }
     };
 
-    updatePlayer(
-      firePlayer,
-      inputs.fireLeft,
-      inputs.fireRight,
-      inputs.fireUp,
-      inputs.fireDown
-    );
-    updatePlayer(
-      waterPlayer,
-      inputs.waterLeft,
-      inputs.waterRight,
-      inputs.waterUp,
-      inputs.waterDown
-    );
+    if (!localRole || localRole === 'fire') {
+      updatePlayer(
+        firePlayer,
+        inputs.fireLeft,
+        inputs.fireRight,
+        inputs.fireUp,
+        inputs.fireDown
+      );
+    }
+    if (!localRole || localRole === 'water') {
+      updatePlayer(
+        waterPlayer,
+        inputs.waterLeft,
+        inputs.waterRight,
+        inputs.waterUp,
+        inputs.waterDown
+      );
+    }
 
     // 3. Pool hazard checks
     const checkLiquidHazards = (p: Player) => {
@@ -407,8 +415,12 @@ export class GamePhysicsEngine {
       }
     };
 
-    checkLiquidHazards(firePlayer);
-    checkLiquidHazards(waterPlayer);
+    if (!localRole || localRole === 'fire') {
+      checkLiquidHazards(firePlayer);
+    }
+    if (!localRole || localRole === 'water') {
+      checkLiquidHazards(waterPlayer);
+    }
 
     // 4. Pressure plates
     for (const plate of level.plates) {
@@ -430,6 +442,7 @@ export class GamePhysicsEngine {
       if (isPressed !== plate.isPressed) {
         plate.isPressed = isPressed;
         sound.playSwitch();
+        onLocalPlateChanged?.(plate.id, isPressed);
       }
     }
 
@@ -439,9 +452,11 @@ export class GamePhysicsEngine {
       const fireNear = rectOverlap(leverTouchArea, firePlayer);
       const waterNear = rectOverlap(leverTouchArea, waterPlayer);
 
-      if ((fireNear && inputs.fireDown) || (waterNear && inputs.waterDown)) {
+      const canToggle = !localRole || (localRole === 'fire' ? fireNear : waterNear);
+      if (canToggle && ((fireNear && inputs.fireDown) || (waterNear && inputs.waterDown))) {
         lever.isOn = !lever.isOn;
         sound.playSwitch();
+        onLocalLeverToggled?.(lever.id, lever.isOn);
       }
     }
 
@@ -633,8 +648,12 @@ export class GamePhysicsEngine {
           }
         };
 
-        checkShockHit(firePlayer);
-        checkShockHit(waterPlayer);
+        if (!localRole || localRole === 'fire') {
+          checkShockHit(firePlayer);
+        }
+        if (!localRole || localRole === 'water') {
+          checkShockHit(waterPlayer);
+        }
 
         if (sw.distanceTraveled >= sw.maxDistance || sw.x < 32 || sw.x > 29 * level.tileSize) {
           g.shockwaves.splice(i, 1);
@@ -652,12 +671,18 @@ export class GamePhysicsEngine {
         gem.collected = true;
         sound.playGem('fire');
         this.spawnParticles(gem.x + gem.width / 2, gem.y + gem.height / 2, 12, '#ef4444', 'spark', 2);
+        if (!localRole || localRole === 'fire') {
+          onLocalGemCollected?.(gem.id, 'fire');
+        }
       }
       // Water collects blue gems
       if (gem.element === 'water' && !waterPlayer.isDead && rectOverlap(gem, waterPlayer)) {
         gem.collected = true;
         sound.playGem('water');
         this.spawnParticles(gem.x + gem.width / 2, gem.y + gem.height / 2, 12, '#3b82f6', 'bubble', 2);
+        if (!localRole || localRole === 'water') {
+          onLocalGemCollected?.(gem.id, 'water');
+        }
       }
     }
 

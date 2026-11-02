@@ -193,3 +193,13 @@ export interface Particle {
   maxLife: number;
   type?: 'spark' | 'bubble' | 'smoke' | 'shockwave' | 'rune';
 }
+
+export type PlayerRole = 'fire' | 'water';
+
+export interface MultiplayerState {
+  isOnline: boolean;
+  roomCode: string | null;
+  role: PlayerRole | null;
+  opponentConnected: boolean;
+}
+

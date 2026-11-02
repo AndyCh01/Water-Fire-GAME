@@ -3,22 +3,37 @@ import {
   LevelConfig,
   Player,
   LevelProgress,
+  PlayerRole,
 } from '../types/game';
 import { getLevelConfig } from '../game/levels';
 import { GamePhysicsEngine, GameInputs } from '../game/physics';
 import { GameRenderer } from '../game/renderer';
 import { sound } from '../game/audio';
+import { network } from '../game/network';
 import { HUD } from './HUD';
 import { OnScreenControls } from './OnScreenControls';
 import { GameOverModal } from './GameOverModal';
 import { VictoryModal } from './VictoryModal';
 import { LevelSelectModal } from './LevelSelectModal';
 import { ControlsModal } from './ControlsModal';
+import { LogOut, WifiOff } from 'lucide-react';
 
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 576;
 
-export const GameCanvas: React.FC = () => {
+interface GameCanvasProps {
+  isOnline: boolean;
+  roomCode: string | null;
+  playerRole: PlayerRole | null;
+  onExitToLobby: () => void;
+}
+
+export const GameCanvas: React.FC<GameCanvasProps> = ({
+  isOnline,
+  roomCode,
+  playerRole,
+  onExitToLobby,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Level & Game State
@@ -31,6 +46,7 @@ export const GameCanvas: React.FC = () => {
   const [isMuted, setIsMuted] = useState<boolean>(() => sound.getMuted());
   const [soloMode, setSoloMode] = useState<boolean>(false);
   const [activeSoloCharacter, setActiveSoloCharacter] = useState<'fire' | 'water'>('water');
+  const [opponentDisconnected, setOpponentDisconnected] = useState<string | null>(null);
 
   // Modals
   const [showLevelSelect, setShowLevelSelect] = useState<boolean>(false);
@@ -155,7 +171,6 @@ export const GameCanvas: React.FC = () => {
   const saveProgress = useCallback(
     (lvlId: number, timeSecs: number, collected: number, total: number) => {
       setLevelProgress((prev) => {
-        // Calculate stars: 1 star for completing, 2 stars for gems >= 80%, 3 stars for all gems + within par time
         let earnedStars = 1;
         if (collected >= total * 0.8) earnedStars = 2;
         if (collected === total && timeSecs <= levelConfig.parTimeSeconds * 1.25) earnedStars = 3;
@@ -171,7 +186,6 @@ export const GameCanvas: React.FC = () => {
             totalGems: total,
             stars: Math.max(currentProg.stars, earnedStars),
           },
-          // Unlock next level
           ...(lvlId < 3 ? { [lvlId + 1]: { ...prev[lvlId + 1], unlocked: true } } : {}),
         };
 
@@ -186,6 +200,131 @@ export const GameCanvas: React.FC = () => {
     [levelConfig.parTimeSeconds]
   );
 
+  // Network Event Listeners (Multiplayer Sync)
+  useEffect(() => {
+    if (!isOnline) return;
+    const socket = network.getSocket();
+    if (!socket) return;
+
+    // 1. Remote Player Movement
+    const handleRemoteMove = (data: {
+      role: PlayerRole;
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      facing: 'left' | 'right';
+      isGrounded: boolean;
+      animFrame: number;
+    }) => {
+      const target = data.role === 'fire' ? firePlayerRef.current : waterPlayerRef.current;
+      target.x = data.x;
+      target.y = data.y;
+      target.vx = data.vx;
+      target.vy = data.vy;
+      target.facing = data.facing;
+      target.isGrounded = data.isGrounded;
+      target.animFrame = data.animFrame;
+    };
+
+    // 2. Remote Gem Collection
+    const handleRemoteGem = (data: { gemId: string; element: 'fire' | 'water' }) => {
+      const g = levelConfig.gems.find((gem) => gem.id === data.gemId);
+      if (g && !g.collected) {
+        g.collected = true;
+        sound.playGem(data.element);
+        physicsRef.current.spawnParticles(
+          g.x + g.width / 2,
+          g.y + g.height / 2,
+          12,
+          data.element === 'fire' ? '#ef4444' : '#3b82f6',
+          data.element === 'fire' ? 'spark' : 'bubble',
+          2
+        );
+      }
+    };
+
+    // 3. Remote Lever Toggle
+    const handleRemoteLever = (data: { leverId: string; isOn: boolean }) => {
+      const l = levelConfig.levers.find((lever) => lever.id === data.leverId);
+      if (l) {
+        l.isOn = data.isOn;
+        sound.playSwitch();
+      }
+    };
+
+    // 4. Remote Plate State
+    const handleRemotePlate = (data: { plateId: string; isPressed: boolean }) => {
+      const p = levelConfig.plates.find((plate) => plate.id === data.plateId);
+      if (p) {
+        p.isPressed = data.isPressed;
+      }
+    };
+
+    // 5. Remote Box Move
+    const handleRemoteBox = (data: { boxId: string; x: number; y: number; vx: number; vy: number }) => {
+      const b = levelConfig.boxes.find((box) => box.id === data.boxId);
+      if (b) {
+        b.x = data.x;
+        b.y = data.y;
+        b.vx = data.vx;
+        b.vy = data.vy;
+      }
+    };
+
+    // 6. Remote Player Death
+    const handleRemoteDeath = (data: { reason: string }) => {
+      setIsGameOver(true);
+      setGameOverReason(data.reason);
+      sound.playDeath('sizzle');
+    };
+
+    // 7. Synchronized Restart
+    const handleRemoteRestart = () => {
+      loadLevel(currentLevelId);
+    };
+
+    // 8. Synchronized Level Change
+    const handleRemoteLevelChange = (data: { levelId: number }) => {
+      loadLevel(data.levelId);
+    };
+
+    // 9. Remote Victory
+    const handleRemoteVictory = () => {
+      setIsVictory(true);
+      sound.playVictory();
+    };
+
+    // 10. Partner Left / Disconnected
+    const handlePlayerLeft = (data: { message: string }) => {
+      setOpponentDisconnected(data?.message || 'El compañero de equipo se ha desconectado.');
+    };
+
+    socket.on('playerMove', handleRemoteMove);
+    socket.on('gemCollect', handleRemoteGem);
+    socket.on('leverToggle', handleRemoteLever);
+    socket.on('plateState', handleRemotePlate);
+    socket.on('boxMove', handleRemoteBox);
+    socket.on('playerDeath', handleRemoteDeath);
+    socket.on('levelRestart', handleRemoteRestart);
+    socket.on('levelChange', handleRemoteLevelChange);
+    socket.on('levelVictory', handleRemoteVictory);
+    socket.on('playerLeft', handlePlayerLeft);
+
+    return () => {
+      socket.off('playerMove', handleRemoteMove);
+      socket.off('gemCollect', handleRemoteGem);
+      socket.off('leverToggle', handleRemoteLever);
+      socket.off('plateState', handleRemotePlate);
+      socket.off('boxMove', handleRemoteBox);
+      socket.off('playerDeath', handleRemoteDeath);
+      socket.off('levelRestart', handleRemoteRestart);
+      socket.off('levelChange', handleRemoteLevelChange);
+      socket.off('levelVictory', handleRemoteVictory);
+      socket.off('playerLeft', handlePlayerLeft);
+    };
+  }, [isOnline, levelConfig, currentLevelId, loadLevel]);
+
   // Keyboard Event Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -196,13 +335,17 @@ export const GameCanvas: React.FC = () => {
         e.preventDefault();
       }
 
-      // Quick restart
+      // Quick restart (sync if online)
       if (e.code === 'KeyR') {
-        loadLevel(currentLevelId);
+        if (isOnline) {
+          network.emitRestart();
+        } else {
+          loadLevel(currentLevelId);
+        }
       }
 
-      // Solo mode switch
-      if (e.code === 'Space') {
+      // Solo mode switch (offline only)
+      if (e.code === 'Space' && !isOnline) {
         setActiveSoloCharacter((prev) => (prev === 'fire' ? 'water' : 'fire'));
       }
     };
@@ -218,13 +361,14 @@ export const GameCanvas: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [currentLevelId, loadLevel]);
+  }, [currentLevelId, isOnline, loadLevel]);
 
-  // Game Loop
+  // Main Game Loop
   useEffect(() => {
     let animId: number;
     let lastTime = performance.now();
     let secondAccumulator = 0;
+    let networkSyncFrame = 0;
 
     const loop = (now: number) => {
       const dt = Math.min((now - lastTime) / 1000, 0.1);
@@ -243,34 +387,21 @@ export const GameCanvas: React.FC = () => {
       const keys = keysRef.current;
       const touch = touchInputsRef.current;
 
-      const inputs: GameInputs = {
-        // Fireboy
-        fireLeft:
-          (!soloMode || activeSoloCharacter === 'fire') &&
-          (Boolean(keys['ArrowLeft']) || Boolean(touch['fireLeft'])),
-        fireRight:
-          (!soloMode || activeSoloCharacter === 'fire') &&
-          (Boolean(keys['ArrowRight']) || Boolean(touch['fireRight'])),
-        fireUp:
-          (!soloMode || activeSoloCharacter === 'fire') &&
-          (Boolean(keys['ArrowUp']) || Boolean(touch['fireUp'])),
-        fireDown:
-          (!soloMode || activeSoloCharacter === 'fire') &&
-          (Boolean(keys['ArrowDown']) || Boolean(touch['fireDown'])),
+      const isFireAllowed = isOnline ? playerRole === 'fire' : !soloMode || activeSoloCharacter === 'fire';
+      const isWaterAllowed = isOnline ? playerRole === 'water' : !soloMode || activeSoloCharacter === 'water';
 
-        // Watergirl
-        waterLeft:
-          (!soloMode || activeSoloCharacter === 'water') &&
-          (Boolean(keys['KeyA']) || Boolean(touch['waterLeft'])),
-        waterRight:
-          (!soloMode || activeSoloCharacter === 'water') &&
-          (Boolean(keys['KeyD']) || Boolean(touch['waterRight'])),
-        waterUp:
-          (!soloMode || activeSoloCharacter === 'water') &&
-          (Boolean(keys['KeyW']) || Boolean(touch['waterUp'])),
-        waterDown:
-          (!soloMode || activeSoloCharacter === 'water') &&
-          (Boolean(keys['KeyS']) || Boolean(touch['waterDown'])),
+      const inputs: GameInputs = {
+        // Fireboy (Arrows)
+        fireLeft: isFireAllowed && (Boolean(keys['ArrowLeft']) || Boolean(touch['fireLeft'])),
+        fireRight: isFireAllowed && (Boolean(keys['ArrowRight']) || Boolean(touch['fireRight'])),
+        fireUp: isFireAllowed && (Boolean(keys['ArrowUp']) || Boolean(touch['fireUp'])),
+        fireDown: isFireAllowed && (Boolean(keys['ArrowDown']) || Boolean(touch['fireDown'])),
+
+        // Watergirl (WASD)
+        waterLeft: isWaterAllowed && (Boolean(keys['KeyA']) || Boolean(touch['waterLeft'])),
+        waterRight: isWaterAllowed && (Boolean(keys['KeyD']) || Boolean(touch['waterRight'])),
+        waterUp: isWaterAllowed && (Boolean(keys['KeyW']) || Boolean(touch['waterUp'])),
+        waterDown: isWaterAllowed && (Boolean(keys['KeyS']) || Boolean(touch['waterDown'])),
       };
 
       // Physics update
@@ -283,20 +414,55 @@ export const GameCanvas: React.FC = () => {
           (reason: string) => {
             setIsGameOver(true);
             setGameOverReason(reason);
+            if (isOnline) {
+              network.emitDeath(reason);
+            }
           },
           () => {
             setIsVictory(true);
             sound.playVictory();
             const blueCollected = levelConfig.gems.filter((g) => g.element === 'water' && g.collected).length;
             const redCollected = levelConfig.gems.filter((g) => g.element === 'fire' && g.collected).length;
-            saveProgress(
-              currentLevelId,
-              elapsedSeconds,
-              blueCollected + redCollected,
-              levelConfig.gems.length
-            );
+            const totalCollected = blueCollected + redCollected;
+            saveProgress(currentLevelId, elapsedSeconds, totalCollected, levelConfig.gems.length);
+            if (isOnline) {
+              network.emitVictory(elapsedSeconds, totalCollected, levelConfig.gems.length);
+            }
+          },
+          isOnline ? playerRole || undefined : undefined,
+          (gemId, element) => {
+            if (isOnline) {
+              network.emitGemCollect(gemId, element);
+            }
+          },
+          (leverId, isOn) => {
+            if (isOnline) {
+              network.emitLeverToggle(leverId, isOn);
+            }
+          },
+          (plateId, isPressed) => {
+            if (isOnline) {
+              network.emitPlateState(plateId, isPressed);
+            }
           }
         );
+
+        // Network: Broadcast local player's updated position & motion
+        if (isOnline && playerRole) {
+          networkSyncFrame++;
+          if (networkSyncFrame % 2 === 0) {
+            const localP = playerRole === 'fire' ? firePlayerRef.current : waterPlayerRef.current;
+            network.emitMove({
+              x: localP.x,
+              y: localP.y,
+              vx: localP.vx,
+              vy: localP.vy,
+              facing: localP.facing,
+              isGrounded: localP.isGrounded,
+              animFrame: localP.animFrame,
+            });
+          }
+        }
       }
 
       // Canvas Rendering
@@ -332,6 +498,8 @@ export const GameCanvas: React.FC = () => {
     currentLevelId,
     soloMode,
     activeSoloCharacter,
+    isOnline,
+    playerRole,
     elapsedSeconds,
     saveProgress,
   ]);
@@ -347,6 +515,31 @@ export const GameCanvas: React.FC = () => {
   const handleToggleMute = () => {
     const next = sound.toggleMute();
     setIsMuted(next);
+  };
+
+  const handleRestart = () => {
+    if (isOnline) {
+      network.emitRestart();
+    } else {
+      loadLevel(currentLevelId);
+    }
+  };
+
+  const handleNextLevel = () => {
+    const nextLvl = currentLevelId + 1;
+    if (isOnline) {
+      network.emitLevelChange(nextLvl);
+    } else {
+      loadLevel(nextLvl);
+    }
+  };
+
+  const handleSelectLevel = (id: number) => {
+    if (isOnline) {
+      network.emitLevelChange(id);
+    } else {
+      loadLevel(id);
+    }
   };
 
   // Gem stats
@@ -368,11 +561,15 @@ export const GameCanvas: React.FC = () => {
         isMuted={isMuted}
         soloMode={soloMode}
         activeSoloCharacter={activeSoloCharacter}
+        isOnline={isOnline}
+        roomCode={roomCode}
+        playerRole={playerRole}
         onToggleMute={handleToggleMute}
         onToggleSoloMode={() => setSoloMode((prev) => !prev)}
-        onRestart={() => loadLevel(currentLevelId)}
+        onRestart={handleRestart}
         onOpenLevelSelect={() => setShowLevelSelect(true)}
         onOpenControls={() => setShowControls(true)}
+        onLeaveRoom={onExitToLobby}
       />
 
       {/* Main Game Arena Container */}
@@ -411,6 +608,8 @@ export const GameCanvas: React.FC = () => {
       <OnScreenControls
         soloMode={soloMode}
         activeSoloCharacter={activeSoloCharacter}
+        isOnline={isOnline}
+        playerRole={playerRole}
         onInputDown={handleTouchDown}
         onInputUp={handleTouchUp}
         onSwitchSolo={() => setActiveSoloCharacter((prev) => (prev === 'fire' ? 'water' : 'fire'))}
@@ -420,7 +619,7 @@ export const GameCanvas: React.FC = () => {
       {isGameOver && (
         <GameOverModal
           reason={gameOverReason}
-          onRestart={() => loadLevel(currentLevelId)}
+          onRestart={handleRestart}
         />
       )}
 
@@ -440,8 +639,8 @@ export const GameCanvas: React.FC = () => {
               ? 2
               : 1
           }
-          onNextLevel={() => loadLevel(currentLevelId + 1)}
-          onRestart={() => loadLevel(currentLevelId)}
+          onNextLevel={handleNextLevel}
+          onRestart={handleRestart}
           onSelectLevel={() => {
             setIsVictory(false);
             setShowLevelSelect(true);
@@ -453,13 +652,35 @@ export const GameCanvas: React.FC = () => {
         <LevelSelectModal
           currentLevelId={currentLevelId}
           levelProgress={levelProgress}
-          onSelectLevel={(id) => loadLevel(id)}
+          onSelectLevel={handleSelectLevel}
           onClose={() => setShowLevelSelect(false)}
         />
       )}
 
       {showControls && (
         <ControlsModal onClose={() => setShowControls(false)} />
+      )}
+
+      {/* Opponent Disconnected Modal */}
+      {opponentDisconnected && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center shadow-2xl flex flex-col items-center">
+            <div className="w-14 h-14 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mb-4">
+              <WifiOff className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">Compañero Desconectado</h3>
+            <p className="text-xs text-slate-300 mb-6 leading-relaxed">
+              {opponentDisconnected}
+            </p>
+            <button
+              onClick={onExitToLobby}
+              className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 flex items-center justify-center gap-2 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Volver a la Pantalla de Salas (Lobby)</span>
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
