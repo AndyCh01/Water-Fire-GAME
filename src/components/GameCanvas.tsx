@@ -14,7 +14,7 @@ import { HUD } from './HUD';
 import { OnScreenControls } from './OnScreenControls';
 import { GameOverModal } from './GameOverModal';
 import { VictoryModal } from './VictoryModal';
-import { LevelSelectModal } from './LevelSelectModal';
+import { LevelSelect3D } from './LevelSelect3D';
 import { ControlsModal } from './ControlsModal';
 import { LogOut, WifiOff } from 'lucide-react';
 
@@ -25,6 +25,7 @@ interface GameCanvasProps {
   isOnline: boolean;
   roomCode: string | null;
   playerRole: PlayerRole | null;
+  initialLevel?: number;
   onExitToLobby: () => void;
 }
 
@@ -32,13 +33,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   isOnline,
   roomCode,
   playerRole,
+  initialLevel = 1,
   onExitToLobby,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Level & Game State
-  const [currentLevelId, setCurrentLevelId] = useState<number>(1);
-  const [levelConfig, setLevelConfig] = useState<LevelConfig>(() => getLevelConfig(1));
+  const [currentLevelId, setCurrentLevelId] = useState<number>(initialLevel);
+  const [levelConfig, setLevelConfig] = useState<LevelConfig>(() => getLevelConfig(initialLevel));
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [gameOverReason, setGameOverReason] = useState<string>('');
@@ -649,7 +651,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       )}
 
       {showLevelSelect && (
-        <LevelSelectModal
+        <LevelSelect3D
           currentLevelId={currentLevelId}
           levelProgress={levelProgress}
           onSelectLevel={handleSelectLevel}

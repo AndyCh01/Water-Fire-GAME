@@ -10,10 +10,13 @@ export default function App() {
   const [playerRole, setPlayerRole] = useState<PlayerRole | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(true);
 
-  const handleStartGame = (code: string | null, role: PlayerRole | null, online: boolean) => {
+  const [initialLevel, setInitialLevel] = useState<number>(1);
+
+  const handleStartGame = (code: string | null, role: PlayerRole | null, online: boolean, level = 1) => {
     setRoomCode(code);
     setPlayerRole(role);
     setIsOnline(online);
+    setInitialLevel(level);
     setGameState('playing');
   };
 
@@ -33,6 +36,7 @@ export default function App() {
       isOnline={isOnline}
       roomCode={roomCode}
       playerRole={playerRole}
+      initialLevel={initialLevel}
       onExitToLobby={handleExitToLobby}
     />
   );

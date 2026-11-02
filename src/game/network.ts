@@ -8,7 +8,7 @@ class NetworkManager {
 
   public init(): Socket {
     if (!this.socket) {
-    
+      // Connect strictly to production backend on Render
       this.socket = io("https://water-fire-backend.onrender.com", {
         transports: ['websocket', 'polling'],
         reconnectionAttempts: 10,

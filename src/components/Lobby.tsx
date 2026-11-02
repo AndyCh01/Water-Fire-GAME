@@ -12,10 +12,11 @@ import {
   Gamepad2,
 } from 'lucide-react';
 import { network } from '../game/network';
-import { PlayerRole } from '../types/game';
+import { PlayerRole, LevelProgress } from '../types/game';
+import { LevelSelect3D } from './LevelSelect3D';
 
 interface LobbyProps {
-  onGameStart: (roomCode: string | null, role: PlayerRole | null, isOnline: boolean) => void;
+  onGameStart: (roomCode: string | null, role: PlayerRole | null, isOnline: boolean, initialLevel?: number) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({ onGameStart }) => {
@@ -25,6 +26,22 @@ export const Lobby: React.FC<LobbyProps> = ({ onGameStart }) => {
   const [isJoining, setIsJoining] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [showTemple3D, setShowTemple3D] = useState<boolean>(false);
+
+  // Level progress for 3D temple
+  const [levelProgress] = useState<{ [id: number]: LevelProgress }>(() => {
+    try {
+      const saved = localStorage.getItem('water_fire_progress');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {
+      1: { unlocked: true, completed: false, stars: 0, gemsCollected: 0, totalGems: 8 },
+      2: { unlocked: false, completed: false, stars: 0, gemsCollected: 0, totalGems: 10 },
+      3: { unlocked: false, completed: false, stars: 0, gemsCollected: 0, totalGems: 10 },
+    };
+  });
 
   useEffect(() => {
     const socket = network.init();
@@ -286,9 +303,16 @@ export const Lobby: React.FC<LobbyProps> = ({ onGameStart }) => {
           )}
         </div>
 
-        {/* Footer / Local Offline Practice Mode */}
-        <div className="mt-6 flex items-center justify-between w-full text-xs text-slate-500 px-2">
-          <span>Water-Fire v2.0 Online</span>
+        {/* Footer / Local Offline Practice Mode & 3D Temple */}
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 w-full text-xs text-slate-500 px-2">
+          <button
+            onClick={() => setShowTemple3D(true)}
+            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 border border-slate-700/80 flex items-center gap-1.5 transition-all shadow-sm"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="font-semibold">Santuario Templo 3D</span>
+          </button>
+
           <button
             onClick={handlePlayLocal}
             className="text-slate-400 hover:text-white underline underline-offset-4 flex items-center gap-1.5 transition-colors"
@@ -298,6 +322,19 @@ export const Lobby: React.FC<LobbyProps> = ({ onGameStart }) => {
           </button>
         </div>
       </div>
+
+      {/* 3D Temple Level Select Modal */}
+      {showTemple3D && (
+        <LevelSelect3D
+          currentLevelId={1}
+          levelProgress={levelProgress}
+          onSelectLevel={(id) => {
+            setShowTemple3D(false);
+            onGameStart(null, null, false, id);
+          }}
+          onClose={() => setShowTemple3D(false)}
+        />
+      )}
     </div>
   );
 };
